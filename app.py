@@ -1,4 +1,6 @@
 import os
+import base64
+import io
 import anthropic
 import requests
 import spotipy
@@ -342,6 +344,97 @@ def search():
         return jsonify({"error": "Could not find a recipe. Try different ingredients."}), 500
 
     return jsonify({"recipes": recipes})
+
+
+@app.route("/translator")
+@require_auth
+def translator_page():
+    return render_template("translator.html")
+
+
+@app.route("/translator/translate", methods=["POST"])
+@require_auth
+def translate():
+    language = request.form.get("language", "Spanish (Mexican)")
+    text_input = request.form.get("text_input", "").strip()
+    file = request.files.get("file")
+
+    LANGUAGE_INSTRUCTIONS = {
+        "Spanish (Mexican)": (
+            "Translate the following into Mexican Spanish (Latin American Spanish as used in Mexico). "
+            "Use 'ustedes' instead of 'vosotros'. Infer the tone from the content — "
+            "casual/fun content should feel natural and warm, not stiff or overly formal. "
+            "Use conjugations and phrasing that feel native, not textbook."
+        ),
+        "Swahili": (
+            "Translate the following into standard Swahili as spoken in Tanzania/Kenya. "
+            "Infer the tone from the content — casual/fun content should feel natural and engaging, "
+            "not overly formal. Use phrasing that feels natural to a native speaker."
+        ),
+    }
+
+    lang_instruction = LANGUAGE_INSTRUCTIONS.get(language, LANGUAGE_INSTRUCTIONS["Spanish (Mexican)"])
+
+    prompt = (
+        f"{lang_instruction}\n\n"
+        "Return your response in exactly this format — nothing else:\n\n"
+        "TRANSLATION:\n[full translated text]\n\n"
+        "REASONING:\n[2-4 sentences explaining your tone decisions and any notable translation choices]"
+    )
+
+    content = []
+
+    if file and file.filename:
+        filename = file.filename.lower()
+        file_data = file.read()
+        ext = filename.rsplit(".", 1)[-1] if "." in filename else ""
+
+        if ext in ("png", "jpg", "jpeg", "gif", "webp"):
+            media_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                         "gif": "image/gif", "webp": "image/webp"}
+            content = [
+                {"type": "image", "source": {"type": "base64",
+                 "media_type": media_map[ext], "data": base64.standard_b64encode(file_data).decode()}},
+                {"type": "text", "text": prompt},
+            ]
+        elif ext == "pdf":
+            content = [
+                {"type": "document", "source": {"type": "base64",
+                 "media_type": "application/pdf", "data": base64.standard_b64encode(file_data).decode()}},
+                {"type": "text", "text": prompt},
+            ]
+        elif ext == "docx":
+            from docx import Document
+            doc = Document(io.BytesIO(file_data))
+            text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+            content = [{"type": "text", "text": f"Document text:\n\n{text}\n\n{prompt}"}]
+        elif ext == "txt":
+            text = file_data.decode("utf-8", errors="replace")
+            content = [{"type": "text", "text": f"Document text:\n\n{text}\n\n{prompt}"}]
+        else:
+            return jsonify({"error": "Unsupported file type. Please upload an image, PDF, DOCX, or TXT file."}), 400
+
+    elif text_input:
+        content = [{"type": "text", "text": f"Text to translate:\n\n{text_input}\n\n{prompt}"}]
+    else:
+        return jsonify({"error": "Please paste some text or upload a file."}), 400
+
+    msg = client.messages.create(
+        model="claude-sonnet-4-6", max_tokens=2000,
+        messages=[{"role": "user", "content": content}],
+    )
+
+    response = msg.content[0].text.strip()
+    translation, reasoning = "", ""
+
+    if "TRANSLATION:" in response and "REASONING:" in response:
+        parts = response.split("REASONING:", 1)
+        translation = parts[0].replace("TRANSLATION:", "").strip()
+        reasoning = parts[1].strip()
+    else:
+        translation = response
+
+    return jsonify({"translation": translation, "reasoning": reasoning})
 
 
 if __name__ == "__main__":

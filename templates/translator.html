@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Translator</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
+  <meta name="theme-color" content="#ffffff">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { color-scheme: light only; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      font-weight: 400;
+      background: #ffffff !important;
+      color: #111111 !important;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 20px 80px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 720px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    nav {
+      display: flex;
+      gap: 28px;
+      margin-bottom: 56px;
+      width: 100%;
+    }
+    nav a {
+      font-size: 0.8rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-decoration: none;
+      color: #bbb;
+      transition: color 0.15s;
+    }
+    nav a.active, nav a:hover { color: #111; }
+
+    .title-wrap {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: 3.2rem;
+      font-weight: 700;
+      color: #111;
+      line-height: 1.1;
+    }
+    .tagline {
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 1.05rem;
+      color: #b89a6a;
+      margin-top: 10px;
+    }
+
+    .card {
+      width: 100%;
+      background: #fff;
+      border-radius: 16px;
+      padding: 36px 40px;
+      border: 1.5px solid #ebebeb;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+      margin-bottom: 20px;
+    }
+
+    .card-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #b89a6a;
+      margin-bottom: 12px;
+    }
+
+    .input-toggle {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+    .toggle-btn {
+      padding: 7px 16px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.8rem;
+      font-weight: 500;
+      background: #f3f3f3;
+      color: #888;
+      border: 1.5px solid transparent;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .toggle-btn.active {
+      background: #fff;
+      color: #111;
+      border-color: #b89a6a;
+    }
+    .toggle-btn:hover { color: #111; background: #ebebeb; }
+
+    #pasteSection, #uploadSection { display: none; }
+    #pasteSection.visible, #uploadSection.visible { display: block; }
+
+    textarea {
+      width: 100%;
+      padding: 16px 18px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.95rem;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 12px;
+      resize: vertical;
+      min-height: 140px;
+      background: #fafafa;
+      color: #111;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      line-height: 1.6;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: #b89a6a;
+      box-shadow: 0 0 0 3px rgba(184,154,106,0.12);
+      background: #fff;
+    }
+    textarea[readonly] {
+      background: #fafafa;
+      cursor: text;
+    }
+    textarea[readonly]:focus {
+      border-color: #b89a6a;
+      box-shadow: 0 0 0 3px rgba(184,154,106,0.12);
+    }
+
+    .upload-area {
+      border: 2px dashed #e0e0e0;
+      border-radius: 12px;
+      padding: 36px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      background: #fafafa;
+    }
+    .upload-area:hover, .upload-area.dragover {
+      border-color: #b89a6a;
+      background: #fdf8f0;
+    }
+    .upload-area input { display: none; }
+    .upload-icon { font-size: 2rem; margin-bottom: 10px; }
+    .upload-area p {
+      font-size: 0.9rem;
+      color: #888;
+      margin-bottom: 4px;
+    }
+    .upload-area .file-types {
+      font-size: 0.75rem;
+      color: #bbb;
+    }
+    .file-selected {
+      margin-top: 12px;
+      font-size: 0.85rem;
+      color: #b89a6a;
+      font-weight: 500;
+    }
+
+    .controls-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-top: 20px;
+    }
+
+    select {
+      flex: 1;
+      padding: 12px 16px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.9rem;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 10px;
+      background: #fafafa;
+      color: #111;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 36px;
+      transition: border-color 0.2s;
+    }
+    select:focus { outline: none; border-color: #b89a6a; }
+
+    button.primary {
+      padding: 12px 32px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 600;
+      background: #111;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    button.primary:hover { background: #333; transform: translateY(-1px); }
+    button.primary:disabled { background: #ccc; cursor: default; transform: none; }
+
+    #status {
+      font-size: 0.88rem;
+      color: #b89a6a;
+      font-style: italic;
+      text-align: center;
+      min-height: 20px;
+      margin-bottom: 8px;
+    }
+
+    .output-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .copy-btn {
+      padding: 6px 14px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 500;
+      background: #f3f3f3;
+      color: #555;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .copy-btn:hover { background: #ebebeb; color: #111; }
+
+    .reasoning-box {
+      background: #fdf8f0;
+      border: 1.5px solid rgba(184,154,106,0.25);
+      border-radius: 12px;
+      padding: 18px 20px;
+      font-size: 0.88rem;
+      line-height: 1.7;
+      color: #555;
+    }
+    .reasoning-box strong {
+      display: block;
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #b89a6a;
+      margin-bottom: 8px;
+    }
+
+    .error { color: #c0392b; font-style: italic; text-align: center; }
+
+    #outputSection { display: none; }
+
+    @media (max-width: 500px) {
+      h1 { font-size: 2.4rem; }
+      .card { padding: 24px 20px; }
+      .controls-row { flex-direction: column; }
+      button.primary { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav>
+      <a href="/">Recipe Maker</a>
+      <a href="/playlist">Playlist Maker</a>
+      <a href="/youtube">YouTube</a>
+      <a href="/translator" class="active">Translator</a>
+    </nav>
+
+    <div class="title-wrap">
+      <h1>Translator</h1>
+      <p class="tagline">Natural, context-aware translations.</p>
+    </div>
+
+    <!-- Input Card -->
+    <div class="card">
+      <div class="card-label">Input</div>
+
+      <div class="input-toggle">
+        <button class="toggle-btn active" onclick="switchInput('paste')">Paste Text</button>
+        <button class="toggle-btn" onclick="switchInput('upload')">Upload File</button>
+      </div>
+
+      <div id="pasteSection" class="visible">
+        <textarea id="pasteText" placeholder="Paste your English text here..."></textarea>
+      </div>
+
+      <div id="uploadSection">
+        <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+          <input type="file" id="fileInput" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.docx,.txt" onchange="fileSelected(this)">
+          <div class="upload-icon">📄</div>
+          <p>Click to upload or drag and drop</p>
+          <div class="file-types">PNG, JPG, PDF, DOCX, TXT</div>
+          <div class="file-selected" id="fileSelectedLabel"></div>
+        </div>
+      </div>
+
+      <div class="controls-row">
+        <select id="languageSelect">
+          <option value="Spanish (Mexican)">Spanish (Mexican)</option>
+          <option value="Swahili">Swahili</option>
+        </select>
+        <button class="primary" id="translateBtn" onclick="translate()">Translate</button>
+      </div>
+    </div>
+
+    <div id="status"></div>
+
+    <!-- Output Section -->
+    <div id="outputSection">
+      <div class="card">
+        <div class="output-header">
+          <div class="card-label" style="margin-bottom:0">Translation</div>
+          <button class="copy-btn" onclick="copyTranslation()">Copy</button>
+        </div>
+        <textarea id="translationOutput" rows="8"></textarea>
+      </div>
+
+      <div class="reasoning-box">
+        <strong>Translation Notes</strong>
+        <span id="reasoningOutput"></span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let activeInput = 'paste';
+
+    function switchInput(mode) {
+      activeInput = mode;
+      document.getElementById('pasteSection').classList.toggle('visible', mode === 'paste');
+      document.getElementById('uploadSection').classList.toggle('visible', mode === 'upload');
+      document.querySelectorAll('.toggle-btn').forEach((b, i) => {
+        b.classList.toggle('active', (i === 0 && mode === 'paste') || (i === 1 && mode === 'upload'));
+      });
+    }
+
+    function fileSelected(input) {
+      const label = document.getElementById('fileSelectedLabel');
+      label.textContent = input.files[0] ? `Selected: ${input.files[0].name}` : '';
+    }
+
+    // Drag and drop
+    const uploadArea = document.getElementById('uploadArea');
+    uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+    uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+    uploadArea.addEventListener('drop', e => {
+      e.preventDefault();
+      uploadArea.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if (file) {
+        const input = document.getElementById('fileInput');
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        fileSelected(input);
+      }
+    });
+
+    async function translate() {
+      const btn = document.getElementById('translateBtn');
+      const status = document.getElementById('status');
+      const output = document.getElementById('outputSection');
+
+      btn.disabled = true;
+      status.textContent = 'Translating...';
+      output.style.display = 'none';
+
+      const formData = new FormData();
+      formData.append('language', document.getElementById('languageSelect').value);
+
+      if (activeInput === 'paste') {
+        const text = document.getElementById('pasteText').value.trim();
+        if (!text) {
+          status.innerHTML = '<span class="error">Please paste some text first.</span>';
+          btn.disabled = false;
+          return;
+        }
+        formData.append('text_input', text);
+      } else {
+        const file = document.getElementById('fileInput').files[0];
+        if (!file) {
+          status.innerHTML = '<span class="error">Please select a file first.</span>';
+          btn.disabled = false;
+          return;
+        }
+        formData.append('file', file);
+      }
+
+      try {
+        const resp = await fetch('/translator/translate', { method: 'POST', body: formData });
+        const data = await resp.json();
+
+        if (data.error) {
+          status.innerHTML = `<span class="error">${data.error}</span>`;
+          return;
+        }
+
+        status.textContent = '';
+        document.getElementById('translationOutput').value = data.translation;
+        document.getElementById('reasoningOutput').textContent = data.reasoning;
+        output.style.display = 'block';
+      } catch (e) {
+        status.innerHTML = '<span class="error">Something went wrong. Please try again.</span>';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function copyTranslation() {
+      const text = document.getElementById('translationOutput').value;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.querySelector('.copy-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 2000);
+      });
+    }
+  </script>
+</body>
+</html>
