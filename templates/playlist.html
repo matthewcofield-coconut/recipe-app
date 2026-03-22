@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Playlist Maker</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;1,400&family=Lato:wght@300;400&display=swap" rel="stylesheet">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="apple-touch-icon" href="/static/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0f0e0c">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Lato', sans-serif;
+      font-weight: 300;
+      background: #0f0e0c;
+      color: #f0ece4;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 56px 16px;
+      position: relative;
+      overflow-x: hidden;
+    }
+    body::before, body::after {
+      content: '';
+      position: fixed;
+      width: 520px;
+      height: 520px;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 0;
+    }
+    body::before {
+      top: -180px; left: -180px;
+      background: radial-gradient(circle at 30% 30%, rgba(29,185,84,0.12) 0%, rgba(20,100,50,0.08) 40%, transparent 70%);
+      animation: swirl1 18s ease-in-out infinite alternate;
+    }
+    body::after {
+      bottom: -180px; right: -180px;
+      background: radial-gradient(circle at 70% 70%, rgba(29,185,84,0.12) 0%, rgba(20,100,50,0.08) 40%, transparent 70%);
+      animation: swirl2 22s ease-in-out infinite alternate;
+    }
+    .swirl-tl, .swirl-tr, .swirl-bl, .swirl-br {
+      position: fixed; pointer-events: none; z-index: 0; opacity: 0.55;
+    }
+    .swirl-tl { top: 0; left: 0; }
+    .swirl-tr { top: 0; right: 0; transform: scaleX(-1); }
+    .swirl-bl { bottom: 0; left: 0; transform: scaleY(-1); }
+    .swirl-br { bottom: 0; right: 0; transform: scale(-1); }
+    @keyframes swirl1 { 0% { transform: rotate(0deg) scale(1); } 100% { transform: rotate(25deg) scale(1.12); } }
+    @keyframes swirl2 { 0% { transform: rotate(0deg) scale(1); } 100% { transform: rotate(-20deg) scale(1.1); } }
+
+    .container { position: relative; z-index: 1; width: 100%; max-width: 660px; display: flex; flex-direction: column; align-items: center; }
+
+    nav {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 40px;
+    }
+    nav a {
+      font-family: 'Lato', sans-serif;
+      font-size: 0.8rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: rgba(240,236,228,0.4);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    nav a:hover, nav a.active { color: #1db954; }
+
+    h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: 3rem;
+      font-weight: 600;
+      color: #f0ece4;
+      line-height: 1.1;
+    }
+    .tagline {
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 1rem;
+      color: #1db954;
+      margin-top: 6px;
+      margin-bottom: 36px;
+      letter-spacing: 0.04em;
+    }
+    .divider {
+      width: 60px; height: 1px;
+      background: linear-gradient(to right, transparent, #1db954, transparent);
+      margin: 0 auto 36px;
+    }
+
+    #connect-section { text-align: center; width: 100%; }
+    #connect-section p {
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      color: rgba(240,236,228,0.5);
+      margin-bottom: 20px;
+    }
+
+    .spotify-btn {
+      display: inline-block;
+      padding: 14px 32px;
+      font-family: 'Playfair Display', serif;
+      font-size: 0.95rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      background: #1db954;
+      color: #0f0e0c;
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity 0.2s, transform 0.15s;
+    }
+    .spotify-btn:hover { opacity: 0.88; transform: translateY(-1px); }
+
+    #create-section { width: 100%; display: none; }
+    #connected-label {
+      text-align: center;
+      font-size: 0.8rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #1db954;
+      margin-bottom: 28px;
+    }
+
+    .input-row { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-bottom: 28px; }
+    textarea {
+      width: 100%;
+      padding: 16px 18px;
+      font-family: 'Lato', sans-serif;
+      font-size: 0.95rem;
+      font-weight: 300;
+      letter-spacing: 0.03em;
+      border: 1px solid rgba(29,185,84,0.3);
+      border-radius: 10px;
+      resize: none;
+      height: 120px;
+      line-height: 1.6;
+      background: rgba(255,255,255,0.04);
+      color: #f0ece4;
+      transition: border 0.2s;
+    }
+    textarea::placeholder { color: rgba(240,236,228,0.35); }
+    textarea:focus { outline: none; border-color: #1db954; }
+
+    button.generate {
+      width: 100%;
+      padding: 14px 26px;
+      font-family: 'Playfair Display', serif;
+      font-size: 0.95rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      background: linear-gradient(135deg, #1db954, #15803d);
+      color: #0f0e0c;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.15s;
+      white-space: nowrap;
+    }
+    button.generate:hover { opacity: 0.88; transform: translateY(-1px); }
+    button.generate:disabled { opacity: 0.45; cursor: default; transform: none; }
+
+    #status {
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      color: #1db954;
+      font-size: 0.9rem;
+      margin-bottom: 24px;
+      min-height: 20px;
+      text-align: center;
+    }
+
+    #result {
+      width: 100%;
+      background: rgba(255,255,255,0.04);
+      border-radius: 16px;
+      padding: 36px 40px;
+      border: 1px solid rgba(29,185,84,0.2);
+      display: none;
+      text-align: center;
+    }
+    #result h2 {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.6rem;
+      color: #f0ece4;
+      margin-bottom: 8px;
+    }
+    .result-divider { width: 40px; height: 1px; background: linear-gradient(to right, #1db954, transparent); margin: 12px auto 20px; }
+    #result p { color: rgba(240,236,228,0.6); font-size: 0.9rem; margin-bottom: 24px; }
+    #result a {
+      display: inline-block;
+      padding: 12px 28px;
+      background: #1db954;
+      color: #0f0e0c;
+      font-family: 'Playfair Display', serif;
+      font-weight: 600;
+      border-radius: 50px;
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: opacity 0.2s;
+    }
+    #result a:hover { opacity: 0.85; }
+    .error { color: #c0392b; font-style: italic; }
+
+    @media (max-width: 500px) {
+      h1 { font-size: 2.2rem; }
+      .input-row { flex-direction: column; }
+      textarea { height: 80px; }
+      button.generate { width: 100%; }
+      #result { padding: 24px 20px; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="swirl-tl" width="260" height="260" viewBox="0 0 260 260" fill="none"><path d="M10,250 C10,130 80,10 250,10" stroke="rgba(29,185,84,0.2)" stroke-width="1.5" fill="none"/><path d="M30,250 C30,140 100,30 250,30" stroke="rgba(29,185,84,0.12)" stroke-width="1" fill="none"/><path d="M0,200 C40,160 80,80 200,0" stroke="rgba(29,185,84,0.15)" stroke-width="1" fill="none"/><circle cx="18" cy="18" r="3" fill="rgba(29,185,84,0.3)"/></svg>
+  <svg class="swirl-tr" width="260" height="260" viewBox="0 0 260 260" fill="none"><path d="M10,250 C10,130 80,10 250,10" stroke="rgba(29,185,84,0.2)" stroke-width="1.5" fill="none"/><path d="M30,250 C30,140 100,30 250,30" stroke="rgba(29,185,84,0.12)" stroke-width="1" fill="none"/><path d="M0,200 C40,160 80,80 200,0" stroke="rgba(29,185,84,0.15)" stroke-width="1" fill="none"/><circle cx="18" cy="18" r="3" fill="rgba(29,185,84,0.3)"/></svg>
+  <svg class="swirl-bl" width="260" height="260" viewBox="0 0 260 260" fill="none"><path d="M10,250 C10,130 80,10 250,10" stroke="rgba(29,185,84,0.2)" stroke-width="1.5" fill="none"/><path d="M30,250 C30,140 100,30 250,30" stroke="rgba(29,185,84,0.12)" stroke-width="1" fill="none"/><path d="M0,200 C40,160 80,80 200,0" stroke="rgba(29,185,84,0.15)" stroke-width="1" fill="none"/><circle cx="18" cy="18" r="3" fill="rgba(29,185,84,0.3)"/></svg>
+  <svg class="swirl-br" width="260" height="260" viewBox="0 0 260 260" fill="none"><path d="M10,250 C10,130 80,10 250,10" stroke="rgba(29,185,84,0.2)" stroke-width="1.5" fill="none"/><path d="M30,250 C30,140 100,30 250,30" stroke="rgba(29,185,84,0.12)" stroke-width="1" fill="none"/><path d="M0,200 C40,160 80,80 200,0" stroke="rgba(29,185,84,0.15)" stroke-width="1" fill="none"/><circle cx="18" cy="18" r="3" fill="rgba(29,185,84,0.3)"/></svg>
+
+  <div class="container">
+    <nav>
+      <a href="/">Recipe Maker</a>
+      <a href="/playlist" class="active">Playlist Maker</a>
+      <a href="/youtube">YouTube</a>
+    </nav>
+
+    <div class="title-wrap" style="text-align:center; margin-bottom:10px;">
+      <h1>Playlist Maker</h1>
+      <p class="tagline">Describe a vibe. Get a playlist.</p>
+    </div>
+    <div class="divider"></div>
+
+    <div id="connect-section">
+      <p>Connect your Spotify account to get started.</p>
+      <a href="/spotify/login" class="spotify-btn">Connect Spotify</a>
+    </div>
+
+    <div id="create-section">
+      <div id="connected-label"></div>
+      <div class="input-row">
+        <textarea id="vibe" placeholder="upbeat morning workout, chill Sunday cooking, late night drive..."></textarea>
+        <button class="generate" id="generateBtn" onclick="createPlaylist()">Generate</button>
+      </div>
+      <div id="status"></div>
+      <div id="result"></div>
+    </div>
+  </div>
+
+  <script>
+    async function checkStatus() {
+      const resp = await fetch("/spotify/status");
+      const data = await resp.json();
+      if (data.connected) {
+        document.getElementById("connect-section").style.display = "none";
+        document.getElementById("create-section").style.display = "block";
+        document.getElementById("connected-label").textContent = `Connected as ${data.name}`;
+      }
+    }
+
+    async function createPlaylist() {
+      const vibe = document.getElementById("vibe").value.trim();
+      if (!vibe) return;
+
+      const btn = document.getElementById("generateBtn");
+      const status = document.getElementById("status");
+      const result = document.getElementById("result");
+
+      btn.disabled = true;
+      status.textContent = "Curating your playlist...";
+      result.style.display = "none";
+
+      try {
+        const resp = await fetch("/spotify/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ vibe }),
+        });
+        const data = await resp.json();
+
+        if (data.error) {
+          status.innerHTML = `<span class="error">${data.error}</span>`;
+          return;
+        }
+
+        status.textContent = "";
+        result.style.display = "block";
+        result.innerHTML = `
+          <h2>${data.name}</h2>
+          <div class="result-divider"></div>
+          <p>${data.tracks} tracks added to your Spotify</p>
+          <a href="${data.url}" target="_blank">Open in Spotify</a>
+        `;
+      } catch (e) {
+        status.innerHTML = `<span class="error">Something went wrong. Try again.</span>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById("vibe").addEventListener("keydown", function(e) {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); createPlaylist(); }
+    });
+
+    checkStatus();
+  </script>
+</body>
+</html>

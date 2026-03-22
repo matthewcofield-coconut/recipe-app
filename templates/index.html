@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Recipe Maker</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="apple-touch-icon" href="/static/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Recipe Maker">
+  <meta name="theme-color" content="#ffffff">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root { color-scheme: light only; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      font-weight: 400;
+      background: #ffffff !important;
+      color: #111111 !important;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 20px 80px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 680px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    nav {
+      display: flex;
+      gap: 28px;
+      margin-bottom: 56px;
+      width: 100%;
+    }
+
+    nav a {
+      font-size: 0.8rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-decoration: none;
+      color: #bbb;
+      transition: color 0.15s;
+    }
+    nav a.active, nav a:hover { color: #111; }
+
+    .title-wrap {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: 3.2rem;
+      font-weight: 700;
+      color: #111;
+      line-height: 1.1;
+      letter-spacing: -0.01em;
+    }
+
+    .tagline {
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 1.05rem;
+      color: #b89a6a;
+      margin-top: 10px;
+    }
+
+    .search-wrap {
+      width: 100%;
+      margin-bottom: 32px;
+    }
+
+    textarea {
+      width: 100%;
+      padding: 18px 20px;
+      font-family: 'Inter', sans-serif;
+      font-size: 1rem;
+      font-weight: 400;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 14px;
+      resize: none;
+      height: 64px;
+      line-height: 1.5;
+      background: #fafafa;
+      color: #111;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      display: block;
+    }
+    textarea::placeholder { color: #aaa; }
+    textarea:focus {
+      outline: none;
+      border-color: #b89a6a;
+      box-shadow: 0 0 0 3px rgba(184,154,106,0.12);
+      background: #fff;
+    }
+
+    .search-btn-row {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 10px;
+    }
+
+    button {
+      padding: 12px 28px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      background: #111;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    button:hover { background: #333; transform: translateY(-1px); }
+    button:disabled { background: #ccc; cursor: default; transform: none; }
+
+    #status {
+      font-size: 0.88rem;
+      color: #b89a6a;
+      margin-bottom: 24px;
+      min-height: 20px;
+      text-align: center;
+      font-style: italic;
+    }
+
+    .recipe-tabs {
+      display: none;
+      width: 100%;
+    }
+
+    .tab-bar {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 20px;
+    }
+
+    .tab-btn {
+      padding: 8px 20px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.8rem;
+      font-weight: 500;
+      background: #f3f3f3;
+      color: #888;
+      border: 1.5px solid transparent;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tab-btn:hover { color: #111; background: #ebebeb; transform: none; opacity: 1; }
+    .tab-btn.active {
+      background: #fff;
+      color: #111;
+      border-color: #b89a6a;
+    }
+
+    #result {
+      width: 100%;
+      background: #fff;
+      border-radius: 16px;
+      padding: 40px 44px;
+      border: 1.5px solid #ebebeb;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+      display: none;
+    }
+
+    #result h2 {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: #111;
+      margin-bottom: 6px;
+      line-height: 1.25;
+    }
+
+    .result-divider {
+      width: 36px;
+      height: 2px;
+      background: #b89a6a;
+      border-radius: 2px;
+      margin: 14px 0 28px;
+    }
+
+    #result h3 {
+      font-family: 'Inter', sans-serif;
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #b89a6a;
+      margin-bottom: 12px;
+      margin-top: 28px;
+    }
+
+    #result ul { list-style: none; padding: 0; }
+    #result ul li {
+      padding: 8px 0;
+      border-bottom: 1px solid #f0f0f0;
+      font-size: 0.95rem;
+      color: #333;
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    #result ul li::before {
+      content: '·';
+      color: #b89a6a;
+      font-size: 1.2rem;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    #result ul li:last-child { border-bottom: none; }
+
+    #result ol { padding-left: 0; list-style: none; counter-reset: steps; }
+    #result ol li {
+      counter-increment: steps;
+      padding: 12px 0 12px 40px;
+      position: relative;
+      font-size: 0.95rem;
+      line-height: 1.7;
+      border-bottom: 1px solid #f0f0f0;
+      color: #333;
+    }
+    #result ol li::before {
+      content: counter(steps);
+      position: absolute;
+      left: 0;
+      top: 12px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #fff;
+      background: #b89a6a;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      line-height: 22px;
+    }
+    #result ol li:last-child { border-bottom: none; }
+
+    .calories {
+      margin-top: 28px;
+      padding: 14px 18px;
+      background: #fdf8f0;
+      border: 1.5px solid rgba(184,154,106,0.25);
+      border-radius: 10px;
+      font-size: 0.88rem;
+      color: #888;
+    }
+    .calories span {
+      font-weight: 600;
+      color: #111;
+    }
+
+    .error { color: #c0392b; font-style: italic; }
+
+    @media (max-width: 500px) {
+      h1 { font-size: 2.4rem; }
+      textarea { height: 80px; }
+      #result { padding: 28px 22px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <nav>
+      <a href="/" class="active">Recipe Maker</a>
+      <a href="/playlist">Playlist Maker</a>
+      <a href="/youtube">YouTube</a>
+    </nav>
+
+    <div class="title-wrap">
+      <h1>Recipe Maker</h1>
+      <p class="tagline">Tell me what you have. I'll find something delicious.</p>
+    </div>
+
+    <div class="search-wrap">
+      <textarea id="ingredients" placeholder="chicken breast, garlic, lemon, olive oil..." rows="1"></textarea>
+      <div class="search-btn-row">
+        <button id="searchBtn" onclick="findRecipe()">Find Recipe</button>
+      </div>
+    </div>
+
+    <div id="status"></div>
+
+    <div class="recipe-tabs" id="recipeTabs">
+      <div class="tab-bar" id="tabBar"></div>
+      <div id="result"></div>
+    </div>
+  </div>
+
+  <script>
+    let allRecipes = [];
+
+    async function findRecipe() {
+      const ingredients = document.getElementById("ingredients").value.trim();
+      if (!ingredients) return;
+
+      const btn = document.getElementById("searchBtn");
+      const status = document.getElementById("status");
+      const tabs = document.getElementById("recipeTabs");
+      const tabBar = document.getElementById("tabBar");
+      const result = document.getElementById("result");
+
+      btn.disabled = true;
+      status.textContent = "Searching for the perfect recipe...";
+      tabs.style.display = "none";
+      result.style.display = "none";
+      result.innerHTML = "";
+      tabBar.innerHTML = "";
+      allRecipes = [];
+
+      try {
+        const resp = await fetch("/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ingredients }),
+        });
+        const data = await resp.json();
+
+        if (data.error) {
+          status.innerHTML = `<span class="error">${data.error}</span>`;
+          return;
+        }
+
+        status.textContent = "";
+        allRecipes = data.recipes;
+
+        if (allRecipes.length === 1) {
+          tabs.style.display = "block";
+          renderRecipe(allRecipes[0]);
+        } else {
+          tabs.style.display = "block";
+          allRecipes.forEach((_, i) => {
+            const btn = document.createElement("button");
+            btn.className = "tab-btn" + (i === 0 ? " active" : "");
+            btn.textContent = `Recipe ${i + 1}`;
+            btn.onclick = () => switchTab(i);
+            tabBar.appendChild(btn);
+          });
+          renderRecipe(allRecipes[0]);
+        }
+      } catch (e) {
+        status.innerHTML = `<span class="error">Something went wrong. Try again.</span>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function switchTab(index) {
+      document.querySelectorAll(".tab-btn").forEach((b, i) => {
+        b.classList.toggle("active", i === index);
+      });
+      renderRecipe(allRecipes[index]);
+    }
+
+    function renderRecipe(text) {
+      const result = document.getElementById("result");
+      result.style.display = "block";
+
+      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+      let html = "";
+      let section = null;
+
+      for (const line of lines) {
+        if (line.startsWith("RECIPE NAME:")) {
+          html += `<h2>${line.replace("RECIPE NAME:", "").trim()}</h2><div class="result-divider"></div>`;
+        } else if (line === "INGREDIENTS:") {
+          html += `<h3>Ingredients</h3><ul>`;
+          section = "ingredients";
+        } else if (line === "INSTRUCTIONS:") {
+          if (section === "ingredients") html += `</ul>`;
+          html += `<h3>Instructions</h3><ol>`;
+          section = "instructions";
+        } else if (line.startsWith("CALORIES:")) {
+          if (section === "instructions") html += `</ol>`;
+          const cal = line.replace("CALORIES:", "").trim();
+          html += `<div class="calories">Calories per serving &nbsp;·&nbsp; <span>${cal}</span></div>`;
+          section = null;
+        } else if (section === "ingredients") {
+          html += `<li>${line.replace(/^[-•]\s*/, "")}</li>`;
+        } else if (section === "instructions") {
+          html += `<li>${line.replace(/^\d+\.\s*/, "")}</li>`;
+        }
+      }
+
+      if (section === "ingredients") html += `</ul>`;
+      if (section === "instructions") html += `</ol>`;
+
+      result.innerHTML = html;
+    }
+
+    document.getElementById("ingredients").addEventListener("keydown", function(e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        findRecipe();
+      }
+    });
+  </script>
+</body>
+</html>
