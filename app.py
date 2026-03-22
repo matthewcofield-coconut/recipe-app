@@ -31,7 +31,7 @@ def require_auth(f):
 
 SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET")
-SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8080/callback"
+SPOTIFY_REDIRECT_URI = "https://recipe-app-q87n.onrender.com/callback"
 SPOTIFY_SCOPE = "playlist-modify-public playlist-modify-private user-read-private user-read-email"
 
 RECIPE_FORMAT = """RECIPE NAME: <name>
