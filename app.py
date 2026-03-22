@@ -6,11 +6,27 @@ from youtube_parser import parse_history
 from spotipy.oauth2 import SpotifyOAuth
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
-from flask import Flask, render_template, request, jsonify, redirect, session, url_for
+import functools
+from flask import Flask, render_template, request, jsonify, redirect, session, url_for, Response
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "fallback-dev-key")
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+
+AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "admin")
+AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "changeme")
+
+def require_auth(f):
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or auth.username != AUTH_USERNAME or auth.password != AUTH_PASSWORD:
+            return Response(
+                "Login required", 401,
+                {"WWW-Authenticate": 'Basic realm="Recipe App"'}
+            )
+        return f(*args, **kwargs)
+    return decorated
 
 SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET")
@@ -148,11 +164,13 @@ Be specific — use the correct artist so there is no ambiguity with other songs
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
+@require_auth
 def index():
     return render_template("index.html")
 
 
 @app.route("/playlist")
+@require_auth
 def playlist_page():
     return render_template("playlist.html")
 
@@ -244,6 +262,7 @@ def spotify_debug():
 
 
 @app.route("/youtube")
+@require_auth
 def youtube_page():
     return render_template("youtube.html")
 
@@ -285,16 +304,19 @@ def search():
 
     recipes = []
     seen_names = set()
+    scrape_attempts = 0
+    max_scrape_attempts = 3
 
     for query in build_queries(ingredients):
-        if len(recipes) >= 3:
+        if len(recipes) >= 3 or scrape_attempts >= max_scrape_attempts:
             break
         for url in search_urls(query):
-            if len(recipes) >= 3:
+            if len(recipes) >= 3 or scrape_attempts >= max_scrape_attempts:
                 break
             raw = scrape_page(url)
             if not raw:
                 continue
+            scrape_attempts += 1
             result = extract_from_page(raw, ingredients)
             if not result or result == "NO_RECIPE":
                 continue
