@@ -4,7 +4,6 @@ import io
 import anthropic
 import requests
 import spotipy
-from youtube_parser import parse_history
 from spotipy.oauth2 import SpotifyOAuth
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
@@ -262,39 +261,6 @@ def spotify_debug():
         "scope": token.get("scope"),
     })
 
-
-@app.route("/youtube")
-@require_auth
-def youtube_page():
-    return render_template("youtube.html")
-
-
-@app.route("/youtube/data")
-def youtube_data():
-    data = parse_history()
-    return jsonify(data)
-
-
-@app.route("/youtube/recommend", methods=["POST"])
-def youtube_recommend():
-    data = parse_history()
-    top = [ch for ch, _ in data["top_channels"][:15]]
-    prompt = f"""Based on these YouTube channels a user watches most frequently:
-{', '.join(top)}
-
-Suggest 8 YouTube creators or channels they would likely enjoy but may not have discovered yet.
-For each, give the channel name and one sentence on why they'd like it based on the above viewing habits.
-
-Format exactly like this, nothing else:
-CHANNEL: <name>
-WHY: <one sentence reason>
-
-Repeat for all 8."""
-    msg = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=800,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return jsonify({"recommendations": msg.content[0].text.strip()})
 
 
 @app.route("/search", methods=["POST"])
