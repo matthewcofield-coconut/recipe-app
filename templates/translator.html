@@ -316,7 +316,7 @@
           <option value="Spanish (Mexican)">Spanish (Mexican)</option>
           <option value="Swahili">Swahili</option>
         </select>
-        <button class="primary" id="translateBtn" onclick="translate()">Translate</button>
+        <button class="primary" id="translateBtn" onclick="runTranslation()">Translate</button>
       </div>
     </div>
 
@@ -373,7 +373,7 @@
       }
     });
 
-    async function translate() {
+    async function runTranslation() {
       const btn = document.getElementById('translateBtn');
       const status = document.getElementById('status');
       const output = document.getElementById('outputSection');
