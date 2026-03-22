@@ -189,7 +189,7 @@ def get_auburn_news() -> dict:
         try:
             with DDGS() as ddgs:
                 items = list(ddgs.news(query, max_results=4, timelimit="d"))
-            results[sport] = "\n".join(f"• {i['title']} ({i.get('source', '')})" for i in items) or "No recent news."
+            results[sport] = "\n".join(f"• {i['title']} ({i.get('source', '')}) — {i.get('url', '')}" for i in items) or "No recent news."
         except Exception as e:
             results[sport] = f"Unavailable: {e}"
     return results
@@ -213,7 +213,7 @@ AUBURN FOOTBALL NEWS:
 Write a clean, friendly morning briefing as an HTML email. Requirements:
 - Warm greeting mentioning today's date
 - Weather section: today's conditions up front, then the full 7-day outlook in a simple table or list
-- Auburn sports section: basketball then football headlines
+- Auburn sports section: basketball then football headlines, each as a clickable <a href="..."> link using the URL provided
 - Tone: casual and personal, like a message from a helpful friend
 - Use inline CSS only (no external stylesheets). Keep it clean and readable on mobile.
 - Output only the HTML — no markdown fences, no explanation."""
