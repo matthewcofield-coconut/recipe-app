@@ -1,6 +1,7 @@
 import os
 import base64
 import io
+import smtplib
 import anthropic
 import requests
 import spotipy
@@ -8,6 +9,10 @@ from spotipy.oauth2 import SpotifyOAuth
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 import functools
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from flask import Flask, render_template, request, jsonify, redirect, session, url_for, Response
 
 app = Flask(__name__)
@@ -16,6 +21,12 @@ client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "admin")
 AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "changeme")
+
+GMAIL_USER = "Matthew.cofield@gmail.com"
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD")
+BRIEFING_SECRET = os.environ.get("BRIEFING_SECRET")
+
+CENTRAL = ZoneInfo("America/Chicago")
 
 def require_auth(f):
     @functools.wraps(f)
@@ -121,6 +132,98 @@ No links, no commentary, no fluff. Just the recipe."""
         messages=[{"role": "user", "content": prompt}],
     )
     return msg.content[0].text.strip()
+
+
+# ── Briefing helpers ──────────────────────────────────────────────────────────
+
+WMO_CODES = {
+    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Foggy", 48: "Icy fog", 51: "Light drizzle", 53: "Moderate drizzle",
+    55: "Dense drizzle", 61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
+    71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow", 77: "Snow grains",
+    80: "Slight showers", 81: "Moderate showers", 82: "Violent showers",
+    95: "Thunderstorm", 96: "Thunderstorm w/ hail", 99: "Thunderstorm w/ heavy hail",
+}
+
+
+def get_weather() -> str:
+    try:
+        resp = requests.get("https://api.open-meteo.com/v1/forecast", params={
+            "latitude": 32.6099, "longitude": -85.4808,
+            "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode",
+            "temperature_unit": "fahrenheit",
+            "timezone": "America/Chicago",
+            "forecast_days": 7,
+        }, timeout=10)
+        daily = resp.json()["daily"]
+        lines = []
+        for i in range(7):
+            dt = datetime.strptime(daily["time"][i], "%Y-%m-%d")
+            desc = WMO_CODES.get(daily["weathercode"][i], "Unknown")
+            high = round(daily["temperature_2m_max"][i])
+            low = round(daily["temperature_2m_min"][i])
+            precip = daily["precipitation_probability_max"][i]
+            lines.append(f"{dt.strftime('%A, %b %d')}: {desc}, {high}°F / {low}°F, {precip}% rain")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Weather unavailable: {e}"
+
+
+
+def get_auburn_news() -> dict:
+    topics = {
+        "Basketball": "Auburn Tigers men's basketball latest news",
+        "Football": "Auburn Tigers football latest news",
+    }
+    results = {}
+    for sport, query in topics.items():
+        try:
+            with DDGS() as ddgs:
+                items = list(ddgs.news(query, max_results=4))
+            results[sport] = "\n".join(f"• {i['title']} ({i.get('source', '')})" for i in items) or "No recent news."
+        except Exception as e:
+            results[sport] = f"Unavailable: {e}"
+    return results
+
+
+def generate_briefing_html(weather: str, news: dict) -> str:
+    today = datetime.now(CENTRAL).strftime("%A, %B %d, %Y")
+    prompt = f"""You are writing a daily morning briefing email for Matthew. Today is {today}.
+
+DATA:
+
+WEATHER — Auburn, AL (7-day forecast):
+{weather}
+
+AUBURN BASKETBALL NEWS:
+{news.get('Basketball', 'N/A')}
+
+AUBURN FOOTBALL NEWS:
+{news.get('Football', 'N/A')}
+
+Write a clean, friendly morning briefing as an HTML email. Requirements:
+- Warm greeting mentioning today's date
+- Weather section: today's conditions up front, then the full 7-day outlook in a simple table or list
+- Auburn sports section: basketball then football headlines
+- Tone: casual and personal, like a message from a helpful friend
+- Use inline CSS only (no external stylesheets). Keep it clean and readable on mobile.
+- Output only the HTML — no markdown fences, no explanation."""
+    msg = client.messages.create(
+        model="claude-haiku-4-5-20251001", max_tokens=2500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return msg.content[0].text.strip()
+
+
+def send_briefing_email(subject: str, html_body: str):
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = GMAIL_USER
+    msg["To"] = GMAIL_USER
+    msg.attach(MIMEText(html_body, "html"))
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+        server.sendmail(GMAIL_USER, GMAIL_USER, msg.as_string())
 
 
 # ── Spotify helpers ───────────────────────────────────────────────────────────
@@ -401,6 +504,19 @@ def translate():
         translation = response
 
     return jsonify({"translation": translation, "reasoning": reasoning})
+
+
+@app.route("/briefing", methods=["GET", "POST"])
+def briefing():
+    secret = request.args.get("secret")
+    if not BRIEFING_SECRET or secret != BRIEFING_SECRET:
+        return Response("Unauthorized", 401)
+    weather = get_weather()
+    news = get_auburn_news()
+    html = generate_briefing_html(weather, news)
+    today = datetime.now(CENTRAL).strftime("%A, %B %d")
+    send_briefing_email(f"Good Morning, Matthew — {today}", html)
+    return jsonify({"status": "sent"})
 
 
 if __name__ == "__main__":
