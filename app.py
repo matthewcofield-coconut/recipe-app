@@ -149,7 +149,7 @@ WMO_CODES = {
 def get_weather() -> str:
     try:
         resp = requests.get("https://api.open-meteo.com/v1/forecast", params={
-            "latitude": 32.6099, "longitude": -85.4808,
+            "latitude": 34.1015, "longitude": -84.5194,
             "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode",
             "temperature_unit": "fahrenheit",
             "timezone": "America/Chicago",
@@ -179,7 +179,7 @@ def get_auburn_news() -> dict:
     for sport, query in topics.items():
         try:
             with DDGS() as ddgs:
-                items = list(ddgs.news(query, max_results=4))
+                items = list(ddgs.news(query, max_results=4, timelimit="w"))
             results[sport] = "\n".join(f"• {i['title']} ({i.get('source', '')})" for i in items) or "No recent news."
         except Exception as e:
             results[sport] = f"Unavailable: {e}"
@@ -212,7 +212,13 @@ Write a clean, friendly morning briefing as an HTML email. Requirements:
         model="claude-haiku-4-5-20251001", max_tokens=2500,
         messages=[{"role": "user", "content": prompt}],
     )
-    return msg.content[0].text.strip()
+    html = msg.content[0].text.strip()
+    # Strip markdown code fences if Claude wraps the output
+    if html.startswith("```"):
+        html = html.split("\n", 1)[-1]
+    if html.endswith("```"):
+        html = html.rsplit("```", 1)[0]
+    return html.strip()
 
 
 def send_briefing_email(subject: str, html_body: str):
