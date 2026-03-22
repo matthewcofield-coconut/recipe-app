@@ -150,16 +150,25 @@ def get_weather() -> str:
     try:
         resp = requests.get("https://api.open-meteo.com/v1/forecast", params={
             "latitude": 34.1015, "longitude": -84.5194,
-            "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode",
+            "current": "temperature_2m,weather_code,precipitation_probability",
+            "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code",
             "temperature_unit": "fahrenheit",
-            "timezone": "America/Chicago",
+            "timezone": "America/New_York",
             "forecast_days": 7,
         }, timeout=10)
-        daily = resp.json()["daily"]
-        lines = []
+        data = resp.json()
+        current = data["current"]
+        daily = data["daily"]
+
+        now_temp = round(current["temperature_2m"])
+        now_desc = WMO_CODES.get(current["weather_code"], "Unknown")
+        now_precip = current["precipitation_probability"]
+        today_line = f"Right now: {now_desc}, {now_temp}°F, {now_precip}% chance of rain"
+
+        lines = [today_line, ""]
         for i in range(7):
             dt = datetime.strptime(daily["time"][i], "%Y-%m-%d")
-            desc = WMO_CODES.get(daily["weathercode"][i], "Unknown")
+            desc = WMO_CODES.get(daily["weather_code"][i], "Unknown")
             high = round(daily["temperature_2m_max"][i])
             low = round(daily["temperature_2m_min"][i])
             precip = daily["precipitation_probability_max"][i]
@@ -179,7 +188,7 @@ def get_auburn_news() -> dict:
     for sport, query in topics.items():
         try:
             with DDGS() as ddgs:
-                items = list(ddgs.news(query, max_results=4, timelimit="w"))
+                items = list(ddgs.news(query, max_results=4, timelimit="d"))
             results[sport] = "\n".join(f"• {i['title']} ({i.get('source', '')})" for i in items) or "No recent news."
         except Exception as e:
             results[sport] = f"Unavailable: {e}"
@@ -192,7 +201,7 @@ def generate_briefing_html(weather: str, news: dict) -> str:
 
 DATA:
 
-WEATHER — Auburn, AL (7-day forecast):
+WEATHER — Woodstock, GA (current conditions + 7-day forecast):
 {weather}
 
 AUBURN BASKETBALL NEWS:
