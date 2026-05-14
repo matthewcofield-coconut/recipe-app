@@ -1,13 +1,18 @@
 import os
 import base64
 import io
+import json
 import smtplib
+import subprocess
+import sys
 import anthropic
 import requests
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
+from ytmusicapi import YTMusic
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
+import feedparser
 import functools
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -180,16 +185,22 @@ def get_weather() -> str:
 
 
 def get_auburn_news() -> dict:
-    topics = {
-        "Basketball": "Auburn Tigers men's basketball latest news",
-        "Football": "Auburn Tigers football latest news",
+    feeds = {
+        "Basketball": "https://news.google.com/rss/search?q=Auburn+Tigers+basketball+when:1d&hl=en-US&gl=US&ceid=US:en",
+        "Football": "https://news.google.com/rss/search?q=Auburn+Tigers+football+when:1d&hl=en-US&gl=US&ceid=US:en",
     }
     results = {}
-    for sport, query in topics.items():
+    for sport, url in feeds.items():
         try:
-            with DDGS() as ddgs:
-                items = list(ddgs.news(query, max_results=4, timelimit="d"))
-            results[sport] = "\n".join(f"• {i['title']} ({i.get('source', '')}) — {i.get('url', '')}" for i in items) or "No recent news."
+            feed = feedparser.parse(url)
+            items = feed.entries[:4]
+            if items:
+                results[sport] = "\n".join(
+                    f"• {e.get('title', 'No title')} ({e.get('source', {}).get('title', '')}) — {e.get('link', '')}"
+                    for e in items
+                )
+            else:
+                results[sport] = "No recent news."
         except Exception as e:
             results[sport] = f"Unavailable: {e}"
     return results
@@ -259,25 +270,61 @@ def get_spotify():
     return spotipy.Spotify(auth=token_info["access_token"])
 
 
-def claude_pick_tracks(vibe: str) -> list[dict]:
-    prompt = f"""The user wants a Spotify playlist with this vibe: "{vibe}"
+YTMUSIC_HEADERS_FILE = os.environ.get("YTMUSIC_HEADERS_FILE", os.path.expanduser("~/browser.json"))
 
-Return exactly 20 tracks that fit this vibe. For each track return the exact song title and the exact artist name, separated by a pipe character.
 
-Format (one per line, nothing else):
+def get_ytmusic():
+    if not os.path.exists(YTMUSIC_HEADERS_FILE):
+        return None
+    try:
+        return YTMusic(YTMUSIC_HEADERS_FILE)
+    except Exception:
+        return None
+
+
+def claude_pick_tracks(vibe: str) -> tuple[str, list[dict]]:
+    prompt = f"""The user wants a music playlist with this vibe: "{vibe}"
+
+First, produce a short playlist title (2–5 words, title case, evocative, no quotes, no emojis). It should accurately describe the resulting mix — not just echo the user's prompt verbatim. Avoid generic words like "Playlist", "Vibes", "Mix" unless they're essential.
+
+Then return exactly 20 tracks that fit this vibe.
+
+Important interpretation rules:
+- When the user names an artist as a reference (e.g. "John Mayer-like", "songs like Phoebe Bridgers", "Bon Iver vibes"), they want songs SIMILAR IN STYLE to that artist — NOT songs by that artist. Pick tracks by other artists who share the relevant qualities (guitar tone, vocal style, mood, production, lyrical register, etc.).
+- Only include songs by a referenced artist if the user explicitly says so ("include some John Mayer", "with John Mayer mixed in").
+- Vary the artists across the 20 tracks — no more than 2 songs by the same artist unless the user asks for a single-artist mix.
+- Treat genre/mood descriptors (e.g. "lofi beat", "moody", "summery") as hard constraints — every track should plausibly match the dominant vibe, not just the reference artist.
+
+For each track return the exact song title and the exact artist name, separated by a pipe character.
+
+Output format (exactly this, nothing else):
+TITLE: <playlist title>
+---
 track title | artist name
+track title | artist name
+... (20 tracks total)
 
 Be specific — use the correct artist so there is no ambiguity with other songs of the same name."""
     msg = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=600,
+        model="claude-sonnet-4-6", max_tokens=700,
         messages=[{"role": "user", "content": prompt}],
     )
+    text = msg.content[0].text.strip()
+    title = ""
     tracks = []
-    for line in msg.content[0].text.strip().split("\n"):
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line or line == "---":
+            continue
+        if line.upper().startswith("TITLE:") and not title:
+            title = line.split(":", 1)[1].strip().strip('"').strip("'")
+            continue
         if "|" in line:
             parts = line.split("|", 1)
             tracks.append({"title": parts[0].strip(), "artist": parts[1].strip()})
-    return tracks
+    if not title:
+        title = vibe.title()
+    return title, tracks
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -362,6 +409,91 @@ def spotify_create():
         "name": playlist["name"],
         "tracks": len(track_uris),
         "url": playlist["external_urls"]["spotify"],
+    })
+
+
+@app.route("/ytm/status")
+def ytm_status():
+    ytm = get_ytmusic()
+    if not ytm:
+        return jsonify({"connected": False, "reason": f"Missing {YTMUSIC_HEADERS_FILE}"})
+    try:
+        info = ytm.get_account_info()
+        name = info.get("accountName") or "YouTube Music"
+        return jsonify({"connected": True, "name": name})
+    except Exception as e:
+        return jsonify({
+            "connected": False,
+            "reason": f"Headers loaded but auth probe failed — cookies likely expired ({type(e).__name__})",
+        })
+
+
+@app.route("/ytm/refresh", methods=["POST"])
+def ytm_refresh():
+    script = os.path.expanduser("~/build_ytm_headers.py")
+    if not os.path.exists(script):
+        return jsonify({"ok": False, "error": f"Refresh script not found at {script}"}), 404
+    try:
+        result = subprocess.run(
+            [sys.executable, script],
+            capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": False, "error": "Refresh script timed out (Keychain prompt?)"}), 504
+    if result.returncode != 0:
+        return jsonify({
+            "ok": False,
+            "error": "Refresh script failed",
+            "stderr": result.stderr[-500:],
+            "stdout": result.stdout[-500:],
+        }), 500
+    return jsonify({"ok": True, "output": result.stdout[-500:]})
+
+
+@app.route("/ytm/create", methods=["POST"])
+def ytm_create():
+    ytm = get_ytmusic()
+    if not ytm:
+        return jsonify({"error": "YouTube Music not connected. Refresh browser.json."}), 401
+
+    data = request.get_json() or {}
+    vibe = (data.get("vibe") or "").strip()
+    if not vibe:
+        return jsonify({"error": "No vibe provided"}), 400
+
+    title, tracks = claude_pick_tracks(vibe)
+    video_ids = []
+    for track in tracks:
+        query = f'{track["title"]} {track["artist"]}'
+        try:
+            results = ytm.search(query, filter="songs", limit=1)
+        except Exception:
+            continue
+        if results and results[0].get("videoId"):
+            video_ids.append(results[0]["videoId"])
+
+    if not video_ids:
+        return jsonify({"error": "Couldn't find any tracks. Try a different vibe."}), 500
+
+    try:
+        result = ytm.create_playlist(
+            title=title,
+            description=f"Generated by Recipe Maker · {vibe}",
+            privacy_status="PRIVATE",
+            video_ids=video_ids,
+        )
+    except Exception as e:
+        return jsonify({"error": f"YT Music rejected playlist create: {e}"}), 500
+
+    if isinstance(result, str):
+        playlist_id = result
+    else:
+        return jsonify({"error": "YT Music silently rate-limited. Try again later."}), 503
+
+    return jsonify({
+        "name": title,
+        "tracks": len(video_ids),
+        "url": f"https://music.youtube.com/playlist?list={playlist_id}",
     })
 
 
@@ -519,6 +651,485 @@ def translate():
         translation = response
 
     return jsonify({"translation": translation, "reasoning": reasoning})
+
+
+# ── Car research helpers ──────────────────────────────────────────────────────
+
+CAR_PICK_FORMAT = """For each of the 3 recommendations, output exactly this block — separated by a line containing only ---
+
+MODEL: <year> <make> <model> <trim if relevant>
+PRICE: <typical out-the-door price range, e.g. "$28k–$34k">
+WHY: <1–2 sentences on why it fits the user's criteria>
+SPECS:
+- MPG: <city/hwy or combined>
+- Seats: <number>
+- Cargo: <cu ft or short note>
+- Drivetrain: <FWD/AWD/RWD, engine note if relevant>
+PROS:
+- <pro 1>
+- <pro 2>
+- <pro 3>
+CONS:
+- <con 1>
+- <con 2>
+WATCH FOR: <1 sentence on common reliability issues or things to inspect>"""
+
+
+CAR_COMPARE_FORMAT = """Output a head-to-head comparison in exactly this format:
+
+VERDICT: <1–2 sentence summary naming the winner overall and for whom each car is better>
+
+CATEGORIES:
+- Price & value: <comparison>
+- Reliability: <comparison>
+- Performance & driving: <comparison>
+- Interior & comfort: <comparison>
+- Tech & safety: <comparison>
+- Fuel economy: <comparison>
+- Cargo & practicality: <comparison>
+- Resale value: <comparison>
+
+BEST FOR:
+- <car A name>: <type of buyer who should pick this>
+- <car B name>: <type of buyer who should pick this>"""
+
+
+CAR_DEEPDIVE_FORMAT = """Output exactly this format:
+
+OVERVIEW: <2–3 sentence summary of the car and its reputation>
+
+PRICING:
+- New MSRP range: <range>
+- Typical out-the-door: <range>
+- Used (2–4 yr old): <range>
+
+KEY SPECS:
+- MPG: <city/hwy>
+- Horsepower: <hp>
+- Seats: <#>
+- Cargo: <cu ft>
+- Drivetrain options: <list>
+
+PROS:
+- <pro 1>
+- <pro 2>
+- <pro 3>
+- <pro 4>
+
+CONS:
+- <con 1>
+- <con 2>
+- <con 3>
+
+COMMON PROBLEMS:
+- <known issue 1 — what years, what to inspect>
+- <known issue 2>
+- <known issue 3>
+
+ALTERNATIVES: <2–3 competing models the buyer should also consider, with a phrase on each>
+
+DEALER TIPS:
+- <negotiation tip 1>
+- <negotiation tip 2>
+- <negotiation tip 3>
+- <what to ask / inspect on a test drive>"""
+
+
+def claude_pick_cars(criteria: str, body_style: str = "") -> str:
+    style_line = f"\nBody style preference: {body_style}." if body_style and body_style.lower() != "any" else ""
+    prompt = f"""You are a knowledgeable, no-nonsense car-buying advisor. The user is shopping for a new (or near-new) car and described what they want:
+
+\"\"\"{criteria}\"\"\"{style_line}
+
+Recommend exactly 3 specific models that best fit. Favor models known for reliability and good resale unless the user explicitly prioritizes something else. Mix at least one value pick and one slightly aspirational pick if the budget allows.
+
+Return your answer in exactly this format — nothing else, no preamble, no closing remarks:
+
+{CAR_PICK_FORMAT}"""
+    msg = client.messages.create(
+        model="claude-sonnet-4-6", max_tokens=2000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return msg.content[0].text.strip()
+
+
+CAR_TCO_FORMAT = """Output exactly this format:
+
+SUMMARY: <1–2 sentences on overall ownership cost positioning>
+
+YEARLY:
+- Fuel: <$/year, with assumption like 12,000 mi/yr at $3.50/gal>
+- Insurance: <$/year, ballpark for a typical 35yo with clean record>
+- Maintenance & repairs: <$/year average over 5 years>
+- Depreciation: <$/year, the biggest line item for new cars>
+
+5-YEAR TOTAL: <total $ across all categories, plus monthly equivalent>
+
+NOTES:
+- <key caveat, e.g. EV charging vs. gas, premium fuel, brand-specific maintenance>
+- <regional variation note>"""
+
+
+CAR_CHECKLIST_FORMAT = """Output exactly this format:
+
+EXTERIOR:
+- <inspection item 1>
+- <inspection item 2>
+- <inspection item 3>
+- <inspection item 4>
+
+INTERIOR:
+- <item>
+- <item>
+- <item>
+- <item>
+
+UNDER THE HOOD:
+- <item>
+- <item>
+- <item>
+
+TEST DRIVE:
+- <item — what to feel/listen for>
+- <item>
+- <item>
+- <item>
+- <item>
+
+QUESTIONS FOR THE DEALER:
+- <question>
+- <question>
+- <question>
+- <question>
+
+MODEL-SPECIFIC RED FLAGS:
+- <known issue to specifically check on this model/year>
+- <known issue>"""
+
+
+def claude_cost_of_ownership(car: str) -> str:
+    prompt = f"""You are a no-nonsense car-buying advisor. Estimate the realistic 5-year total cost of ownership for: \"{car}\".
+
+Use realistic mainstream assumptions: 12,000 miles/year, average US gas/electricity prices, typical insurance for a 35-year-old driver with a clean record, manufacturer-recommended maintenance.
+
+Return your answer in exactly this format — nothing else:
+
+{CAR_TCO_FORMAT}"""
+    msg = client.messages.create(
+        model="claude-sonnet-4-6", max_tokens=900,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return msg.content[0].text.strip()
+
+
+def claude_followup(car: str, question: str) -> str:
+    prompt = f"""You are a no-nonsense car-buying advisor. The user is researching this car: \"{car}\".
+
+They have a follow-up question:
+
+\"\"\"{question}\"\"\"
+
+Answer directly and concisely (3–6 sentences). Be specific, honest, and practical. If you don't know something for certain, say so. No preamble, no headers — just the answer."""
+    msg = client.messages.create(
+        model="claude-sonnet-4-6", max_tokens=700,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return msg.content[0].text.strip()
+
+
+def claude_test_drive_checklist(car: str) -> str:
+    prompt = f"""You are a seasoned car-buying advisor. Generate a thorough but practical inspection and test-drive checklist for: \"{car}\".
+
+Include model-specific red flags — known reliability issues for this make/model/year that buyers should specifically check before buying.
+
+Return your answer in exactly this format — nothing else:
+
+{CAR_CHECKLIST_FORMAT}"""
+    msg = client.messages.create(
+        model="claude-sonnet-4-6", max_tokens=1500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return msg.content[0].text.strip()
+
+
+def car_news_search(car: str) -> list[dict]:
+    topics = [
+        ("Review", f"{car} review"),
+        ("Recall", f"{car} recall"),
+        ("Reliability", f"{car} reliability problems"),
+    ]
+    seen = set()
+    items = []
+    for label, q in topics:
+        try:
+            with DDGS() as ddgs:
+                # `news` returns actual articles, not Wikipedia/calendar pages
+                results = list(ddgs.news(q, max_results=4, timelimit="y"))
+        except Exception:
+            results = []
+        # fallback to text search if news returns nothing
+        if not results:
+            try:
+                with DDGS() as ddgs:
+                    results = [
+                        {"title": r.get("title", ""), "url": r.get("href", ""),
+                         "body": r.get("body", "")}
+                        for r in ddgs.text(q, max_results=4)
+                    ]
+            except Exception:
+                continue
+        for r in results:
+            href = r.get("url") or r.get("href", "")
+            if not href or href in seen:
+                continue
+            seen.add(href)
+            items.append({
+                "title": r.get("title", ""),
+                "url": href,
+                "snippet": (r.get("body", "") or r.get("excerpt", "") or "")[:240],
+                "topic": label,
+            })
+            if len(items) >= 10:
+                return items
+    return items
+
+
+def claude_compare_cars(car_a: str, car_b: str, car_c: str = "") -> str:
+    cars = [c for c in [car_a, car_b, car_c] if c.strip()]
+    cars_str = " vs. ".join(cars)
+    prompt = f"""You are a no-nonsense car-buying advisor. Compare these vehicles head-to-head: {cars_str}.
+
+Be specific and honest. Call out clear winners in each category. If two are tied, say so.
+
+Return your answer in exactly this format — nothing else:
+
+{CAR_COMPARE_FORMAT}"""
+    msg = client.messages.create(
+        model="claude-sonnet-4-6", max_tokens=2000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return msg.content[0].text.strip()
+
+
+def claude_deepdive_car(car: str) -> str:
+    prompt = f"""You are a no-nonsense car-buying advisor. The user is researching this vehicle: \"{car}\".
+
+Give them everything they need to know before walking into a dealership: real pricing, known problems by model year, what alternatives to cross-shop, and concrete negotiation tips.
+
+Return your answer in exactly this format — nothing else:
+
+{CAR_DEEPDIVE_FORMAT}"""
+    msg = client.messages.create(
+        model="claude-sonnet-4-6", max_tokens=2500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return msg.content[0].text.strip()
+
+
+# ── Car research routes ───────────────────────────────────────────────────────
+
+@app.route("/cars")
+@require_auth
+def cars_page():
+    return render_template("car.html")
+
+
+@app.route("/cars/pick", methods=["POST"])
+@require_auth
+def cars_pick():
+    data = request.get_json()
+    criteria = (data.get("criteria") or "").strip()
+    body_style = (data.get("body_style") or "").strip()
+    if not criteria:
+        return jsonify({"error": "Tell me what you're looking for first."}), 400
+    try:
+        return jsonify({"result": claude_pick_cars(criteria, body_style)})
+    except Exception as e:
+        return jsonify({"error": f"Something went wrong: {e}"}), 500
+
+
+@app.route("/cars/cost", methods=["POST"])
+@require_auth
+def cars_cost():
+    data = request.get_json()
+    car = (data.get("car") or "").strip()
+    if not car:
+        return jsonify({"error": "No car specified."}), 400
+    try:
+        return jsonify({"result": claude_cost_of_ownership(car)})
+    except Exception as e:
+        return jsonify({"error": f"Something went wrong: {e}"}), 500
+
+
+@app.route("/cars/followup", methods=["POST"])
+@require_auth
+def cars_followup():
+    data = request.get_json()
+    car = (data.get("car") or "").strip()
+    question = (data.get("question") or "").strip()
+    if not car or not question:
+        return jsonify({"error": "Need both a car and a question."}), 400
+    try:
+        return jsonify({"result": claude_followup(car, question)})
+    except Exception as e:
+        return jsonify({"error": f"Something went wrong: {e}"}), 500
+
+
+@app.route("/cars/checklist", methods=["POST"])
+@require_auth
+def cars_checklist():
+    data = request.get_json()
+    car = (data.get("car") or "").strip()
+    if not car:
+        return jsonify({"error": "No car specified."}), 400
+    try:
+        return jsonify({"result": claude_test_drive_checklist(car)})
+    except Exception as e:
+        return jsonify({"error": f"Something went wrong: {e}"}), 500
+
+
+CAR_FAVORITES_FILE = os.path.join(os.path.dirname(__file__), "data", "car_favorites.json")
+
+
+def _load_car_favorites():
+    try:
+        with open(CAR_FAVORITES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def _save_car_favorites(items):
+    os.makedirs(os.path.dirname(CAR_FAVORITES_FILE), exist_ok=True)
+    with open(CAR_FAVORITES_FILE, "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False, indent=2)
+
+
+@app.route("/cars/favorites", methods=["GET"])
+@require_auth
+def cars_favorites_get():
+    return jsonify({"favorites": _load_car_favorites()})
+
+
+@app.route("/cars/favorites", methods=["POST"])
+@require_auth
+def cars_favorites_set():
+    data = request.get_json(silent=True) or {}
+    items = data.get("favorites")
+    if not isinstance(items, list):
+        return jsonify({"error": "favorites must be a list"}), 400
+    cleaned = []
+    seen = set()
+    for x in items:
+        if not isinstance(x, str):
+            continue
+        name = x.strip()[:120]
+        key = name.lower()
+        if name and key not in seen:
+            seen.add(key)
+            cleaned.append(name)
+        if len(cleaned) >= 100:
+            break
+    _save_car_favorites(cleaned)
+    return jsonify({"favorites": cleaned})
+
+
+LISTING_SITES = [
+    ("autotrader.com",  "AutoTrader"),
+    ("cars.com",        "Cars.com"),
+    ("cargurus.com",    "CarGurus"),
+    ("carvana.com",     "Carvana"),
+    ("edmunds.com",     "Edmunds"),
+    ("truecar.com",     "TrueCar"),
+    ("carmax.com",      "CarMax"),
+]
+
+
+def listings_search(query: str) -> list[dict]:
+    """Run a site-restricted DDG search across the major listings aggregators
+    and return up to 12 deduped results."""
+    sites_clause = " OR ".join(f"site:{d}" for d, _ in LISTING_SITES)
+    full_query = f"{query} ({sites_clause})"
+    seen = set()
+    items = []
+    try:
+        with DDGS() as ddgs:
+            for r in ddgs.text(full_query, max_results=20):
+                href = r.get("href", "")
+                if not href or href in seen:
+                    continue
+                seen.add(href)
+                source = next((label for dom, label in LISTING_SITES if dom in href), "")
+                if not source:
+                    continue
+                items.append({
+                    "title":   r.get("title", "")[:160],
+                    "url":     href,
+                    "snippet": (r.get("body", "") or "")[:240],
+                    "source":  source,
+                })
+                if len(items) >= 12:
+                    break
+    except Exception:
+        pass
+    return items
+
+
+@app.route("/cars/listings", methods=["POST"])
+@require_auth
+def cars_listings():
+    data = request.get_json() or {}
+    query = (data.get("query") or "").strip()
+    if not query:
+        return jsonify({"error": "Build a search first."}), 400
+    return jsonify({"results": listings_search(query)})
+
+
+@app.route("/cars/news", methods=["POST"])
+@require_auth
+def cars_news():
+    data = request.get_json()
+    car = (data.get("car") or "").strip()
+    if not car:
+        return jsonify({"error": "No car specified."}), 400
+    try:
+        return jsonify({"results": car_news_search(car)})
+    except Exception as e:
+        return jsonify({"error": f"Something went wrong: {e}"}), 500
+
+
+@app.route("/cars/compare", methods=["POST"])
+@require_auth
+def cars_compare():
+    data = request.get_json()
+    car_a = (data.get("car_a") or "").strip()
+    car_b = (data.get("car_b") or "").strip()
+    car_c = (data.get("car_c") or "").strip()
+    if not car_a or not car_b:
+        return jsonify({"error": "Enter at least two cars to compare."}), 400
+    try:
+        return jsonify({"result": claude_compare_cars(car_a, car_b, car_c)})
+    except Exception as e:
+        return jsonify({"error": f"Something went wrong: {e}"}), 500
+
+
+@app.route("/cars/deepdive", methods=["POST"])
+@require_auth
+def cars_deepdive():
+    data = request.get_json()
+    car = (data.get("car") or "").strip()
+    if not car:
+        return jsonify({"error": "Enter a car to research."}), 400
+    try:
+        return jsonify({"result": claude_deepdive_car(car)})
+    except Exception as e:
+        return jsonify({"error": f"Something went wrong: {e}"}), 500
+
+
+@app.route("/ping")
+def ping():
+    return Response("pong", 200)
 
 
 @app.route("/briefing", methods=["GET", "POST"])
